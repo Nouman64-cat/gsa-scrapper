@@ -26,6 +26,7 @@ import re
 import sys
 import os
 import time
+import urllib.parse
 from typing import Optional
 
 from selenium import webdriver
@@ -61,9 +62,13 @@ MAX_ROWS_PER_LINK = 6
 # ─────────────────────────────────────────────────────────────────────────────
 
 _COMPARE_BTN_SELECTORS = [
+    # normalize-space(.) matches the full text content including nested <span>/<b>/<i> children.
+    # This is more reliable than text() which only matches direct text nodes.
+    (By.XPATH, "(//button | //a)[contains(normalize-space(.), 'Compare Available Sources')]"),
     (By.XPATH, "//*[contains(text(), 'Compare Available Sources')]"),
+    (By.XPATH, "(//button | //a)[contains(normalize-space(.), 'Compare Sources')]"),
     (By.XPATH, "//*[contains(text(), 'Compare Sources')]"),
-    (By.XPATH, "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'compare available')]"),
+    (By.XPATH, "//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'compare available')]"),
     (By.XPATH, "//*[contains(@class,'compare') and (self::button or self::a)]"),
     (By.CSS_SELECTOR, "button.compareBtn"),
     (By.CSS_SELECTOR, "a.compareBtn"),
@@ -298,40 +303,53 @@ class InternalLinkScraper:
         """
         Open a product detail page, click Compare Available Sources, extract all rows.
         Returns a list of dicts ready for insert_link_scraped_rows().
+
+        Failure chain (each step is a fallback for the previous):
+          1. Compare modal rows  ← primary path
+          2. Inline vendor-list-table on the page (no modal needed)
+          3. Direct page extraction using URL contractNumber + visible price
         """
         try:
             logger.info(f"{self._wid}Loading: {url}")
             self.driver.get(url)
-            self._wait_for_page_ready(timeout=12)
+            self._wait_for_page_ready(timeout=15)
             time.sleep(2)
 
-            # ── Step 1: read Manufacturer Part Number from the 'About This Item'
-            #           specification table on the product detail page itself.
-            #           This is the most reliable source (always visible before
-            #           any modal interaction).
+            # ── Step 1: read MPN from the 'About This Item' spec table ────────
             page_mfr_part_num = self._read_manufacturer_part_number_from_page()
             logger.info(f"{self._wid}Page-level MPN: {page_mfr_part_num!r}")
 
             # ── Step 2: click "Compare Available Sources" ─────────────────────
-            if not self._click_compare_sources_button():
-                logger.warning(f"{self._wid}Compare button not found on: {url}")
-                return []
-
-            # Wait for the compare modal / table to appear
-            time.sleep(2)
-            self._wait_for_compare_table(timeout=10)
+            btn_clicked = self._click_compare_sources_button()
+            if not btn_clicked:
+                logger.warning(
+                    f"{self._wid}Compare button not found — will try inline table "
+                    "and page-direct extraction as fallbacks."
+                )
+            else:
+                # Modal needs time to open and Angular needs time to render its data
+                time.sleep(2)
+                self._wait_for_compare_table(timeout=15)
 
             # ── Step 3: read manufacturer info from "Currently Selected" header
-            # NOTE: we do NOT click the Price column header to re-sort.
-            # Instead, _extract_all_compare_rows() reverses the row list when
-            # sort_order=="high_to_low", giving us the last 6 rows (highest prices).
             mfr_name, modal_mfr_part_num = self._read_currently_selected_info()
-
-            # Page-level MPN takes priority; modal is the fallback.
             mfr_part_num = page_mfr_part_num or modal_mfr_part_num
 
-            # ── Step 4: extract all table rows ────────────────────────────────
+            # ── Step 4: extract compare rows (modal or inline table) ──────────
             rows = self._extract_all_compare_rows(mfr_name, mfr_part_num)
+
+            # ── Step 5: fallback — read product info directly from the page ───
+            # Covers cases where:
+            #   • The compare button was never found (single-vendor item, auth wall)
+            #   • The modal opened but returned 0 rows (structure mismatch)
+            #   • The URL contains contractNumber= we can read directly
+            if not rows:
+                logger.info(
+                    f"{self._wid}Compare approach yielded no rows — "
+                    "falling back to direct page extraction."
+                )
+                rows = self._scrape_page_directly(url, mfr_name, mfr_part_num)
+
             return rows
 
         except Exception as e:
@@ -349,16 +367,147 @@ class InternalLinkScraper:
         except TimeoutException:
             logger.warning(f"{self._wid}Page readyState timeout — continuing anyway.")
 
-    def _wait_for_compare_table(self, timeout: int = 10):
+    def _wait_for_compare_table(self, timeout: int = 15):
+        """Wait for the compare table to appear AND contain at least one price row."""
+        def table_has_price_data(driver):
+            try:
+                tables = driver.find_elements(By.CSS_SELECTOR, "table")
+                for table in tables:
+                    if re.search(r"\$\s*[\d,]+", table.text or ""):
+                        return True
+            except Exception:
+                pass
+            return False
+
         try:
-            WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
-            )
+            WebDriverWait(self.driver, timeout).until(table_has_price_data)
+            logger.info(f"{self._wid}Compare table with price data confirmed.")
         except TimeoutException:
-            logger.warning(f"{self._wid}Compare table did not appear within {timeout}s.")
+            logger.warning(f"{self._wid}Compare table did not appear with data within {timeout}s.")
+
+    # ── Direct page fallback ──────────────────────────────────────────────────
+
+    def _scrape_page_directly(
+        self,
+        url: str,
+        mfr_name: Optional[str],
+        mfr_part_num: Optional[str],
+    ) -> list[dict]:
+        """
+        Fallback extraction used when the Compare Available Sources modal yields
+        nothing.  Two complementary approaches:
+
+        A. URL params: GSA product detail URLs often carry contractNumber= directly.
+           We parse it from the URL without any additional page interaction.
+
+        B. Page body: The currently-selected contractor's price is rendered on the
+           product detail page itself (before any modal click).  We parse the first
+           dollar-sign price and unit from the visible text.
+
+        Returns a list with at most one row dict, or [] if nothing useful is found.
+        """
+        try:
+            # ── A. Contract number from URL query string ───────────────────────
+            contract_number: Optional[str] = None
+            m = re.search(r'[?&]contractNumber=([^&#]+)', url, re.IGNORECASE)
+            if m:
+                contract_number = urllib.parse.unquote(m.group(1)).strip()
+                logger.info(f"{self._wid}Fallback: contract# from URL = {contract_number!r}")
+
+            # ── B. Price / unit from page body text ───────────────────────────
+            body_text: str = ""
+            try:
+                body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            except Exception:
+                pass
+
+            price = self._parse_price_text(body_text) if body_text else None
+            unit = self._parse_unit_text(body_text) if body_text else None
+
+            # Contract number from body text if still missing
+            if not contract_number and body_text:
+                contract_number = self._parse_contract_number(body_text)
+
+            # Contractor name from known DOM selectors
+            contractor_name = self._read_contractor_name_from_page()
+
+            if price is not None or contract_number:
+                row = {
+                    "manufacturer_part_name": mfr_name,
+                    "manufacturer_part_number": mfr_part_num,
+                    "price": price,
+                    "unit": unit,
+                    "contractor_name": contractor_name,
+                    "contract_number": contract_number,
+                    "row_order": 0,
+                }
+                logger.info(
+                    f"{self._wid}Fallback row: price={price}, unit={unit!r}, "
+                    f"contractor={contractor_name!r}, contract#={contract_number!r}"
+                )
+                return [row]
+
+        except Exception as e:
+            logger.debug(f"{self._wid}_scrape_page_directly failed: {e}")
+
+        return []
+
+    def _read_contractor_name_from_page(self) -> Optional[str]:
+        """
+        Try to read the contractor/vendor name that is directly visible on the
+        product detail page (without opening the compare modal).
+        """
+        _css_selectors = [
+            "app-vendor-name",
+            "[class*='vendorName']",
+            "[class*='vendor-name']",
+            "[class*='contractorName']",
+            "[class*='contractor-name']",
+            "div.col-sm-6.text-sm-left",
+            "div.text-sm-left.col-sm-6",
+        ]
+        for sel in _css_selectors:
+            try:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    txt = (el.text or "").strip()
+                    # Skip values that look like contract numbers or are too short
+                    if txt and len(txt) > 3 and not re.match(r'^[A-Z0-9]{6,20}$', txt):
+                        return txt
+            except Exception:
+                pass
+        return None
 
     def _click_compare_sources_button(self) -> bool:
-        """Find and click the Compare Available Sources button."""
+        """Find and click the Compare Available Sources button.
+
+        GSA Advantage is an Angular SPA — the button is only injected into the
+        DOM after Angular finishes bootstrapping and its API calls resolve, which
+        happens *after* document.readyState == 'complete'.  We therefore wait up
+        to 25 seconds for any matching selector to become visible before
+        attempting the click.
+        """
+        def any_compare_btn_visible(driver):
+            for sel_type, sel_val in _COMPARE_BTN_SELECTORS:
+                try:
+                    els = driver.find_elements(sel_type, sel_val)
+                    for el in els:
+                        try:
+                            if el.is_displayed():
+                                return True
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            return False
+
+        try:
+            WebDriverWait(self.driver, 25).until(any_compare_btn_visible)
+            logger.info(f"{self._wid}Compare button appeared in DOM — attempting click.")
+        except TimeoutException:
+            logger.warning(f"{self._wid}Compare button did not appear within 25s.")
+            return False
+
         for sel_type, sel_val in _COMPARE_BTN_SELECTORS:
             try:
                 el = self.driver.find_element(sel_type, sel_val)

@@ -247,10 +247,14 @@ class SearchLinkScraper:
             logger.warning(f"{self._wid}Page readyState timeout, continuing.")
         time.sleep(2)
 
-        # Wait until at least one card selector appears
+        # Wait until at least one card selector appears in the DOM
         self._wait_for_cards()
 
-        # Gentle human-like scroll to trigger lazy rendering
+        # Wait for Angular to populate the cards with actual data (price, contractor).
+        # Cards can appear as empty Angular shells before data-binding completes.
+        self._wait_for_card_data()
+
+        # Gentle human-like scroll to trigger lazy rendering of off-screen cards
         try:
             self.driver.execute_script("window.scrollBy(0, 400);")
             time.sleep(0.6)
@@ -327,6 +331,35 @@ class SearchLinkScraper:
             WebDriverWait(self.driver, PAGE_LOAD_TIMEOUT).until(any_card_present)
         except TimeoutException:
             logger.warning(f"{self._wid}No card elements found within timeout.")
+
+    def _wait_for_card_data(self):
+        """Wait for Angular to populate card elements with actual price data.
+
+        GSA Advantage card components (app-ux-product-display-inline) appear in
+        the DOM as empty shells first, then Angular's async data-binding fills in
+        the price/contractor text via API calls.  Calling _find_cards() immediately
+        after _wait_for_cards() can therefore return cards whose .text is still
+        empty.  This method polls until at least one card shows a price ($X.XX).
+        """
+        def cards_have_price(driver):
+            for sel_type, sel_val in _CARD_SELECTORS:
+                try:
+                    els = driver.find_elements(sel_type, sel_val)
+                    for el in els[:5]:
+                        if re.search(r"\$\s*[\d,]+", el.text or ""):
+                            return True
+                except Exception:
+                    pass
+            return False
+
+        try:
+            WebDriverWait(self.driver, PAGE_LOAD_TIMEOUT).until(cards_have_price)
+            logger.info(f"{self._wid}Card price data confirmed.")
+        except TimeoutException:
+            logger.warning(
+                f"{self._wid}Card price data not confirmed within {PAGE_LOAD_TIMEOUT}s "
+                "— proceeding anyway (cards may be empty)."
+            )
 
     def _find_cards(self) -> list:
         """Return the list of card WebElements using the first matching selector."""
