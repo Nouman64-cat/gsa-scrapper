@@ -39,7 +39,13 @@ def _resolve_workers(requested: int = 0) -> int:
 class LinkExtractionProgressTracker:
     """Thread-safe progress aggregator for parallel link extraction."""
 
-    def __init__(self, total: int, num_workers: int):
+    def __init__(
+        self,
+        total: int,
+        num_workers: int,
+        stop_event: threading.Event,
+        stop_after: int = 0,
+    ):
         self._lock = threading.Lock()
         self.total = total
         self.num_workers = num_workers
@@ -47,6 +53,8 @@ class LinkExtractionProgressTracker:
         self.successful = 0
         self.failed = 0
         self.start_time = time.time()
+        self._stop_event = stop_event
+        self._stop_after = stop_after
         self._worker_status: dict[int, dict] = {
             i: {"completed": 0, "current_part": "", "status": "starting"}
             for i in range(num_workers)
@@ -62,6 +70,8 @@ class LinkExtractionProgressTracker:
             ws = self._worker_status.get(worker_id, {})
             ws["completed"] = ws.get("completed", 0) + 1
             ws["current_part"] = link_url
+            if self._stop_after > 0 and self.completed >= self._stop_after:
+                self._stop_event.set()
 
     def mark_worker(self, worker_id: int, status: str):
         with self._lock:
@@ -81,10 +91,11 @@ class LinkExtractionProgressTracker:
                 "completed": self.completed,
                 "successful": self.successful,
                 "failed": self.failed,
+                "stop_after": self._stop_after,
                 "active_workers": active,
                 "num_workers": self.num_workers,
                 "elapsed_seconds": round(elapsed, 1),
-                "avg_seconds_per_row": round(avg, 1),   # reuses same field name as price scraper
+                "avg_seconds_per_row": round(avg, 1),
                 "estimated_remaining_seconds": round(remaining, 1),
                 "workers": [
                     {"id": wid, **info}
@@ -98,12 +109,13 @@ class LinkExtractionProgressTracker:
 class ParallelLinkExtractionOrchestrator:
     """Coordinates multiple InternalLinkScraper workers in parallel threads."""
 
-    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high"):
+    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0):
         self.sort_order = sort_order
         self.stop_event = threading.Event()
         self.tracker: LinkExtractionProgressTracker | None = None
         self._executor: ThreadPoolExecutor | None = None
         self.num_workers = _resolve_workers(num_workers)
+        self.stop_after = stop_after  # 0 = no limit
         logger.info(
             f"ParallelLinkExtractionOrchestrator: {self.num_workers} workers, "
             f"sort_order={sort_order}"
@@ -181,7 +193,7 @@ class ParallelLinkExtractionOrchestrator:
         if actual_workers < 1:
             actual_workers = 1
 
-        self.tracker = LinkExtractionProgressTracker(total, actual_workers)
+        self.tracker = LinkExtractionProgressTracker(total, actual_workers, self.stop_event, self.stop_after)
 
         # Interleaved slicing: worker-0 gets [0,N,2N,...], worker-1 gets [1,N+1,...]
         chunks = [links[i::actual_workers] for i in range(actual_workers)]

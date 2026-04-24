@@ -10,6 +10,7 @@ from database.repository import (
 )
 from services.parallel_scraper import ParallelScrapingOrchestrator
 from services.parallel_link_extractor import ParallelLinkExtractionOrchestrator
+from services.aws_service import notify_scraping_complete
 from models.requests import ScrapingRequest, LinkExtractionRequest
 
 router = APIRouter(prefix="/api/scrape", tags=["Scraping"])
@@ -33,6 +34,7 @@ def _run_scraping(req: ScrapingRequest) -> None:
         orchestrator = ParallelScrapingOrchestrator(
             num_workers=req.num_workers,
             sort_order=req.sort_order,
+            stop_after=req.stop_after,
         )
         state.parallel_orchestrator = orchestrator
 
@@ -52,6 +54,10 @@ def _run_scraping(req: ScrapingRequest) -> None:
             state.is_scraping_running = False
             state.active_scraping_automation = None
             state.parallel_orchestrator = None
+        try:
+            notify_scraping_complete()
+        except Exception as e:
+            logger.error(f"Post-scraping notification error: {e}")
 
 
 @router.post("/start")
@@ -96,6 +102,7 @@ def _run_link_extraction(req: LinkExtractionRequest) -> None:
         orchestrator = ParallelLinkExtractionOrchestrator(
             num_workers=req.num_workers,
             sort_order=req.sort_order,
+            stop_after=req.stop_after,
         )
         with state.state_lock:
             state.parallel_link_extractor = orchestrator
@@ -108,6 +115,10 @@ def _run_link_extraction(req: LinkExtractionRequest) -> None:
             state.is_link_extraction_running = False
             state.active_link_extractor = None
             state.parallel_link_extractor = None
+        try:
+            notify_scraping_complete()
+        except Exception as e:
+            logger.error(f"Post-link-extraction notification error: {e}")
 
 
 @router.post("/links/start")

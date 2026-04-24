@@ -15,8 +15,10 @@ class ScrapingRequest(BaseModel):
     end_row: int = 100
     num_workers: int = 0     # 0 = auto-detect based on CPU
     sort_order: str = "low_to_high"  # "low_to_high" | "high_to_low"
+    stop_after: int = 0      # 0 = no limit; N = stop once N rows are completed
 
 
 class LinkExtractionRequest(BaseModel):
     sort_order: str = "low_to_high"  # "low_to_high" | "high_to_low"
     num_workers: int = 0              # 0 = auto-detect based on CPU count
+    stop_after: int = 0               # 0 = no limit; N = stop once N links are completed

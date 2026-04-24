@@ -8,7 +8,7 @@ across the codebase.
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_HOST = os.getenv("POSTGRESQL_HOST", "localhost")
@@ -69,3 +69,19 @@ if _raw_proxies:
                 "user": None,
                 "pass": None,
             })
+
+# ── AWS S3 ────────────────────────────────────────────────────────────────────
+AWS_S3_BUCKET_NAME: str = os.getenv("AWS_S3_BUCKET_NAME", "")
+AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+# ── AWS SES ───────────────────────────────────────────────────────────────────
+AWS_SES_FROM_EMAIL: str = os.getenv("AWS_SES_FROM_EMAIL", "")
+AWS_SES_USERNAME: str = os.getenv("AWS_SES_USERNAME", "")   # IAM access key for SES
+AWS_SES_PASSWORD: str = os.getenv("AWS_SES_PASSWORD", "")   # IAM secret key for SES
+AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+
+# ── Notification recipients ───────────────────────────────────────────────────
+RECIPIENT_EMAILS: list[str] = [
+    e.strip() for e in os.getenv("RECIPIENT_EMAILS", "").split(",") if e.strip()
+]

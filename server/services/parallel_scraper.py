@@ -44,7 +44,13 @@ def resolve_num_workers(requested: int = 0) -> int:
 class ProgressTracker:
     """Thread-safe progress aggregator for parallel scraping."""
 
-    def __init__(self, total: int, num_workers: int):
+    def __init__(
+        self,
+        total: int,
+        num_workers: int,
+        stop_event: threading.Event,
+        stop_after: int = 0,
+    ):
         self._lock = threading.Lock()
         self.total = total
         self.num_workers = num_workers
@@ -52,6 +58,8 @@ class ProgressTracker:
         self.successful = 0
         self.failed = 0
         self.start_time = time.time()
+        self._stop_event = stop_event
+        self._stop_after = stop_after
         self._worker_status: dict[int, dict] = {
             i: {"completed": 0, "current_part": "", "status": "starting"}
             for i in range(num_workers)
@@ -67,6 +75,8 @@ class ProgressTracker:
             ws = self._worker_status.get(worker_id, {})
             ws["completed"] = ws.get("completed", 0) + 1
             ws["current_part"] = part_number
+            if self._stop_after > 0 and self.completed >= self._stop_after:
+                self._stop_event.set()
 
     def mark_worker(self, worker_id: int, status: str):
         with self._lock:
@@ -84,6 +94,7 @@ class ProgressTracker:
                 "completed": self.completed,
                 "successful": self.successful,
                 "failed": self.failed,
+                "stop_after": self._stop_after,
                 "active_workers": active,
                 "num_workers": self.num_workers,
                 "elapsed_seconds": round(elapsed, 1),
@@ -99,12 +110,13 @@ class ProgressTracker:
 class ParallelScrapingOrchestrator:
     """Coordinates multiple GSAScrapingAutomation workers."""
 
-    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high"):
+    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0):
         self.proxies = list(SCRAPE_PROXIES)  # copy
         self.stop_event = threading.Event()
         self.tracker: ProgressTracker | None = None
         self._executor: ThreadPoolExecutor | None = None
         self.sort_order = sort_order  # passed to InternalLinkScraper
+        self.stop_after = stop_after  # 0 = no limit
 
         if self.proxies:
             # With proxies: each worker has its own IP → no global rate limiter needed.
@@ -193,7 +205,7 @@ class ParallelScrapingOrchestrator:
         if actual_workers < 1:
             actual_workers = 1
 
-        self.tracker = ProgressTracker(total, actual_workers)
+        self.tracker = ProgressTracker(total, actual_workers, self.stop_event, self.stop_after)
 
         # Interleaved partitioning for even distribution
         chunks = [indices[i::actual_workers] for i in range(actual_workers)]
