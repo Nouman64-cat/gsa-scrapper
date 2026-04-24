@@ -110,13 +110,14 @@ class ProgressTracker:
 class ParallelScrapingOrchestrator:
     """Coordinates multiple GSAScrapingAutomation workers."""
 
-    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0):
+    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0, headless: bool = True):
         self.proxies = list(SCRAPE_PROXIES)  # copy
         self.stop_event = threading.Event()
         self.tracker: ProgressTracker | None = None
         self._executor: ThreadPoolExecutor | None = None
-        self.sort_order = sort_order  # passed to InternalLinkScraper
+        self.sort_order = sort_order
         self.stop_after = stop_after  # 0 = no limit
+        self.headless = headless
 
         if self.proxies:
             # With proxies: each worker has its own IP → no global rate limiter needed.
@@ -269,6 +270,7 @@ class ParallelScrapingOrchestrator:
             on_row_complete=on_complete,
             worker_id=worker_id,
             proxies=self.proxies,
+            headless=self.headless,
         )
 
         while retries < SCRAPE_WORKER_MAX_RETRIES:

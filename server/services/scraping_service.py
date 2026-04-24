@@ -35,7 +35,8 @@ EXCEL_FILE = EXCEL_FILE_PATH
 
 class GSAScrapingAutomation:
     def __init__(self, excel_file_path, stop_event=None, rate_limiter=None,
-                 on_row_complete=None, worker_id=None, proxy=None, proxies=None):
+                 on_row_complete=None, worker_id=None, proxy=None, proxies=None,
+                 headless=True):
         self.excel_file_path = excel_file_path
         self.driver = None
         self.wait = None
@@ -52,6 +53,7 @@ class GSAScrapingAutomation:
         self._proxy = proxy  # {"host", "port", "user", "pass"} or None
         self._proxies = proxies
         self._proxy_ext_path = None  # temp file cleanup
+        self._headless = headless
 
     @property
     def stop_requested(self):
@@ -130,6 +132,10 @@ class GSAScrapingAutomation:
     def setup_driver(self):
         """Initialize Chrome driver with optimized options for speed"""
         chrome_options = Options()
+
+        if self._headless:
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--window-size=1920,1080")
 
         # User-Agent rotation for stealth
         user_agents = [

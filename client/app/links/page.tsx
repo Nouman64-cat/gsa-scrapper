@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from 'react';
-import { Link2, Upload, Loader2, RefreshCw, Search, Link as LinkIcon } from 'lucide-react';
+import { Link2, Upload, Loader2, RefreshCw, Search, Link as LinkIcon, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as api from '../../services/api';
 import { useStatus } from '@/components/StatusProvider';
@@ -11,6 +11,7 @@ export default function LinksPage() {
   const { status, importStatus, error, refreshStatus } = useStatus();
   const [numLinkWorkers, setNumLinkWorkers] = useState(0);
   const [linkSortOrder, setLinkSortOrder] = useState<'low_to_high' | 'high_to_low'>('low_to_high');
+  const [headless, setHeadless] = useState(true);
   const [isUploadingLinks, setIsUploadingLinks] = useState(false);
   const linksFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,7 +39,7 @@ export default function LinksPage() {
     try {
       const workers = numLinkWorkers > 0 ? numLinkWorkers : undefined;
       toast.loading(`Initiating Link Extraction${workers ? ` (${workers} workers)` : ''}...`, { id: 'linkExtract' });
-      await api.startLinkExtraction({ sort_order: linkSortOrder, num_workers: workers });
+      await api.startLinkExtraction({ sort_order: linkSortOrder, num_workers: workers, headless });
       toast.success("Link Extraction queued successfully!", { id: 'linkExtract' });
       refreshStatus();
     } catch (err: any) {
@@ -167,6 +168,34 @@ export default function LinksPage() {
                   {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} Worker{n > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                {headless
+                  ? <EyeOff className="w-4 h-4 text-slate-500" />
+                  : <Eye className="w-4 h-4 text-amber-500" />}
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {headless ? 'Headless Mode' : 'Headed Mode'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {headless ? 'Browser runs hidden in background' : 'Browser windows visible on screen'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setHeadless(h => !h)}
+                disabled={status?.is_link_extraction_running}
+                aria-label="Toggle browser visibility"
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${
+                  headless ? 'bg-slate-600' : 'bg-amber-500'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  headless ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
             </div>
 
             {status?.link_extraction_progress && status.is_link_extraction_running && (

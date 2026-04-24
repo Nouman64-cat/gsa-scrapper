@@ -94,12 +94,14 @@ class SearchLinkScraper:
         stop_event=None,
         on_row_complete=None,
         worker_id: Optional[int] = None,
+        headless: bool = True,
     ):
         self.sort_order = sort_order
         self._stop_event = stop_event
         self._stop_flag = False
         self._on_row_complete = on_row_complete
         self._worker_id = worker_id
+        self._headless = headless
         self.driver = None
         self.wait = None
         self.engine = get_engine()
@@ -122,8 +124,13 @@ class SearchLinkScraper:
     # ── driver management ─────────────────────────────────────────────────────
 
     def setup_driver(self):
-        """Initialize a headless-optional Chrome driver with stealth options."""
+        """Initialize Chrome driver with stealth options."""
         opts = Options()
+
+        if self._headless:
+            opts.add_argument("--headless=new")
+            opts.add_argument("--window-size=1920,1080")
+
         user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

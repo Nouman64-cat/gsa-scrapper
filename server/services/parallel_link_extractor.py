@@ -109,13 +109,14 @@ class LinkExtractionProgressTracker:
 class ParallelLinkExtractionOrchestrator:
     """Coordinates multiple InternalLinkScraper workers in parallel threads."""
 
-    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0):
+    def __init__(self, num_workers: int = 0, sort_order: str = "low_to_high", stop_after: int = 0, headless: bool = True):
         self.sort_order = sort_order
         self.stop_event = threading.Event()
         self.tracker: LinkExtractionProgressTracker | None = None
         self._executor: ThreadPoolExecutor | None = None
         self.num_workers = _resolve_workers(num_workers)
         self.stop_after = stop_after  # 0 = no limit
+        self.headless = headless
         logger.info(
             f"ParallelLinkExtractionOrchestrator: {self.num_workers} workers, "
             f"sort_order={sort_order}"
@@ -256,6 +257,7 @@ class ParallelLinkExtractionOrchestrator:
                 stop_event=self.stop_event,
                 on_row_complete=on_complete,
                 worker_id=worker_id,
+                headless=self.headless,
             )
         else:
             from services.internal_link_scraper import InternalLinkScraper
@@ -264,6 +266,7 @@ class ParallelLinkExtractionOrchestrator:
                 stop_event=self.stop_event,
                 on_row_complete=on_complete,
                 worker_id=worker_id,
+                headless=self.headless,
             )
 
         try:

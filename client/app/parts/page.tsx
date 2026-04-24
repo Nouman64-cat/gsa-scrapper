@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from 'react';
-import { Package, Upload, CheckCircle, Loader2, RefreshCw, Database, Rocket } from 'lucide-react';
+import { Package, Upload, CheckCircle, Loader2, RefreshCw, Database, Rocket, EyeOff, Eye } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as api from '../../services/api';
 import { useStatus } from '@/components/StatusProvider';
@@ -11,6 +11,7 @@ export default function PartsPage() {
   const { status, importStatus, error, refreshStatus } = useStatus();
   const [numWorkers, setNumWorkers] = useState(0);
   const [sortOrder, setSortOrder] = useState<'low_to_high' | 'high_to_low'>('low_to_high');
+  const [headless, setHeadless] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -57,7 +58,7 @@ export default function PartsPage() {
     try {
       const workers = numWorkers > 0 ? numWorkers : undefined;
       toast.loading(`Initiating Full Selenium Scraper${workers ? ` (${workers} workers)` : ''}...`, { id: 'scrape' });
-      await api.startScraping({ mode: 'full', num_workers: workers, sort_order: sortOrder });
+      await api.startScraping({ mode: 'full', num_workers: workers, sort_order: sortOrder, headless });
       toast.success("Selenium Scraping queued successfully!", { id: 'scrape' });
       refreshStatus();
     } catch (err: any) {
@@ -218,6 +219,34 @@ export default function PartsPage() {
                 <option value={0}>Auto-detect</option>
                 {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} Worker{n > 1 ? 's' : ''}</option>)}
               </select>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                {headless
+                  ? <EyeOff className="w-4 h-4 text-slate-500" />
+                  : <Eye className="w-4 h-4 text-amber-500" />}
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {headless ? 'Headless Mode' : 'Headed Mode'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {headless ? 'Browser runs hidden in background' : 'Browser windows visible on screen'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setHeadless(h => !h)}
+                disabled={status?.is_scraping_running}
+                aria-label="Toggle browser visibility"
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${
+                  headless ? 'bg-slate-600' : 'bg-amber-500'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  headless ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
             </div>
 
             {status?.scraping_progress && status.is_scraping_running && (

@@ -16,6 +16,7 @@ export interface ScrapingRequest {
   end_row?: number;
   num_workers?: number;
   sort_order?: 'low_to_high' | 'high_to_low';
+  headless?: boolean;
 }
 
 export interface WorkerStatus {
@@ -56,6 +57,7 @@ export interface AppStatus {
 export interface LinkExtractionRequest {
   sort_order?: 'low_to_high' | 'high_to_low';
   num_workers?: number;
+  headless?: boolean;
 }
 
 const api = axios.create({

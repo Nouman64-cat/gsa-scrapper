@@ -35,6 +35,7 @@ def _run_scraping(req: ScrapingRequest) -> None:
             num_workers=req.num_workers,
             sort_order=req.sort_order,
             stop_after=req.stop_after,
+            headless=req.headless,
         )
         state.parallel_orchestrator = orchestrator
 
@@ -103,6 +104,7 @@ def _run_link_extraction(req: LinkExtractionRequest) -> None:
             num_workers=req.num_workers,
             sort_order=req.sort_order,
             stop_after=req.stop_after,
+            headless=req.headless,
         )
         with state.state_lock:
             state.parallel_link_extractor = orchestrator
