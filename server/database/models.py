@@ -2,6 +2,20 @@ from typing import Optional
 from sqlmodel import SQLModel, Field
 from datetime import datetime
 
+
+class Job(SQLModel, table=True):
+    __tablename__ = 'jobs'
+    id: int = Field(default=None, primary_key=True)
+    type: str = Field()                    # "parts" | "links"
+    status: str = Field(default="pending") # "pending" | "running" | "completed" | "failed"
+    input_filename: str = Field()
+    input_row_count: int = Field(default=0)
+    input_s3_key: Optional[str] = Field(default=None, nullable=True)
+    output_s3_key: Optional[str] = Field(default=None, nullable=True)
+    output_filename: Optional[str] = Field(default=None, nullable=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = Field(default=None, nullable=True)
+
 class GSALink(SQLModel, table=True):
     __tablename__ = 'gsa_links'
     part_number: str = Field(primary_key=True)

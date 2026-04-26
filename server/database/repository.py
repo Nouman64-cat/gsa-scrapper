@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import delete as _sql_delete
 from sqlmodel import Session, select
-from database.models import GSALink, GSAScrapedData, ImportedLink, ImportedPart, LinkScrapedData
+from database.models import GSALink, GSAScrapedData, ImportedLink, ImportedPart, Job, LinkScrapedData
 
 
 def get_link_by_part_number(engine, part_number):
@@ -241,6 +242,57 @@ def clear_links_scraped_data(engine):
     with Session(engine) as session:
         session.exec(_sql_delete(LinkScrapedData))
         session.commit()
+
+
+# ── Jobs ───────────────────────────────────────────────────────
+
+def create_job(engine, job_type: str, input_filename: str, input_row_count: int) -> Job:
+    with Session(engine) as session:
+        job = Job(type=job_type, input_filename=input_filename, input_row_count=input_row_count)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job
+
+
+def update_job_input_s3(engine, job_id: int, s3_key: str) -> None:
+    with Session(engine) as session:
+        job = session.exec(select(Job).where(Job.id == job_id)).first()
+        if job:
+            job.input_s3_key = s3_key
+            session.add(job)
+            session.commit()
+
+
+def update_job_status(engine, job_id: int, status: str) -> None:
+    with Session(engine) as session:
+        job = session.exec(select(Job).where(Job.id == job_id)).first()
+        if job:
+            job.status = status
+            if status in ("completed", "failed"):
+                job.completed_at = datetime.utcnow()
+            session.add(job)
+            session.commit()
+
+
+def update_job_output(engine, job_id: int, output_s3_key: str, output_filename: str) -> None:
+    with Session(engine) as session:
+        job = session.exec(select(Job).where(Job.id == job_id)).first()
+        if job:
+            job.output_s3_key = output_s3_key
+            job.output_filename = output_filename
+            session.add(job)
+            session.commit()
+
+
+def get_all_jobs(engine) -> list[Job]:
+    with Session(engine) as session:
+        return session.exec(select(Job).order_by(Job.created_at.desc())).all()
+
+
+def get_job(engine, job_id: int) -> Optional[Job]:
+    with Session(engine) as session:
+        return session.exec(select(Job).where(Job.id == job_id)).first()
 
 
 def clear_imported_links_scraped_flags(engine):

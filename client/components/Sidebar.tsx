@@ -3,20 +3,22 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  LayoutDashboard, 
-  Package, 
-  Link2, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Package,
+  Link2,
+  Settings,
   HelpCircle,
   ChevronRight,
-  Bot
+  Bot,
+  History
 } from 'lucide-react';
 
 const navItems = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Parts Management', href: '/parts', icon: Package },
   { name: 'Links Management', href: '/links', icon: Link2 },
+  { name: 'Job History', href: '/history', icon: History },
 ];
 
 const secondaryItems = [

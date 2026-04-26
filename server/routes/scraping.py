@@ -7,6 +7,7 @@ from database.repository import (
     get_imported_parts_count,
     get_all_product_detail_links,
     get_all_search_links,
+    update_job_status,
 )
 from services.parallel_scraper import ParallelScrapingOrchestrator
 from services.parallel_link_extractor import ParallelLinkExtractionOrchestrator
@@ -30,6 +31,17 @@ def _validate_range(start_row: int, end_row: int) -> None:
 
 def _run_scraping(req: ScrapingRequest) -> None:
     """Background task: runs parallel scraping and resets state when done."""
+    with state.state_lock:
+        job_id = state.current_parts_job_id
+
+    engine = get_engine()
+    if job_id is not None:
+        try:
+            update_job_status(engine, job_id, "running")
+        except Exception:
+            logger.exception("Failed to mark job as running")
+
+    job_final_status = "failed"
     try:
         orchestrator = ParallelScrapingOrchestrator(
             num_workers=req.num_workers,
@@ -48,6 +60,7 @@ def _run_scraping(req: ScrapingRequest) -> None:
         elif req.mode == "custom":
             orchestrator.run_custom_range(req.start_row, req.end_row)
 
+        job_final_status = "completed"
     except Exception as e:
         logger.error(f"Scraping background task error: {e}")
     finally:
@@ -55,8 +68,15 @@ def _run_scraping(req: ScrapingRequest) -> None:
             state.is_scraping_running = False
             state.active_scraping_automation = None
             state.parallel_orchestrator = None
+
+        if job_id is not None:
+            try:
+                update_job_status(engine, job_id, job_final_status)
+            except Exception:
+                logger.exception("Failed to update job final status")
+
         try:
-            notify_scraping_complete()
+            notify_scraping_complete(job_id=job_id if job_final_status == "completed" else None)
         except Exception as e:
             logger.error(f"Post-scraping notification error: {e}")
 
@@ -99,6 +119,17 @@ async def stop_scrape():
 
 def _run_link_extraction(req: LinkExtractionRequest) -> None:
     """Background task: runs ParallelLinkExtractionOrchestrator and resets state."""
+    with state.state_lock:
+        job_id = state.current_links_job_id
+
+    engine = get_engine()
+    if job_id is not None:
+        try:
+            update_job_status(engine, job_id, "running")
+        except Exception:
+            logger.exception("Failed to mark job as running")
+
+    job_final_status = "failed"
     try:
         orchestrator = ParallelLinkExtractionOrchestrator(
             num_workers=req.num_workers,
@@ -110,6 +141,7 @@ def _run_link_extraction(req: LinkExtractionRequest) -> None:
             state.parallel_link_extractor = orchestrator
             state.active_link_extractor = orchestrator
         orchestrator.run_full()
+        job_final_status = "completed"
     except Exception as e:
         logger.error(f"Link extraction background task error: {e}")
     finally:
@@ -117,8 +149,15 @@ def _run_link_extraction(req: LinkExtractionRequest) -> None:
             state.is_link_extraction_running = False
             state.active_link_extractor = None
             state.parallel_link_extractor = None
+
+        if job_id is not None:
+            try:
+                update_job_status(engine, job_id, job_final_status)
+            except Exception:
+                logger.exception("Failed to update job final status")
+
         try:
-            notify_scraping_complete()
+            notify_scraping_complete(job_id=job_id if job_final_status == "completed" else None)
         except Exception as e:
             logger.error(f"Post-link-extraction notification error: {e}")
 

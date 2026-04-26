@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlmodel import SQLModel
 
 from settings import ALLOWED_ORIGINS
-from routes import imports, links, scraping, status
+from routes import imports, jobs, links, scraping, status
 from database.db import get_engine
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ app.add_middleware(
 )
 
 app.include_router(imports.router)
+app.include_router(jobs.router)
 app.include_router(links.router)
 app.include_router(scraping.router)
 app.include_router(status.router)

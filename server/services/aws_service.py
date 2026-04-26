@@ -3,6 +3,7 @@ import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Optional
 
 import boto3
 import settings
@@ -41,6 +42,32 @@ def upload_to_s3(excel_bytes: bytes, filename: str) -> str:
     return url
 
 
+def upload_input_to_s3(file_bytes: bytes, filename: str) -> str:
+    """Upload a raw input Excel file to S3 under inputs/ and return the S3 key."""
+    from datetime import datetime
+    s3 = _s3_client()
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    key = f"inputs/{timestamp}_{filename}"
+    s3.put_object(
+        Bucket=settings.AWS_S3_BUCKET_NAME,
+        Key=key,
+        Body=file_bytes,
+        ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    logger.info("Uploaded input %s to S3 key %s", filename, key)
+    return key
+
+
+def get_presigned_url(s3_key: str) -> str:
+    """Generate a fresh presigned GET URL for an existing S3 key."""
+    s3 = _s3_client()
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.AWS_S3_BUCKET_NAME, "Key": s3_key},
+        ExpiresIn=_S3_PRESIGNED_EXPIRY,
+    )
+
+
 def send_results_email(excel_bytes: bytes, filename: str, s3_url: str) -> None:
     """Send Excel file as an attachment via SES SMTP to all configured recipients.
 
@@ -77,19 +104,12 @@ def send_results_email(excel_bytes: bytes, filename: str, s3_url: str) -> None:
     logger.info("Results email sent via SES SMTP to: %s", recipients)
 
 
-def notify_scraping_complete() -> None:
-    """Generate the Excel export, upload to S3, and email recipients. Safe to call from any thread."""
-    if not settings.RECIPIENT_EMAILS:
-        logger.warning("RECIPIENT_EMAILS not configured — skipping post-scrape notification")
-        return
+def notify_scraping_complete(job_id: Optional[int] = None) -> None:
+    """Generate the Excel export, upload to S3, email recipients, and update the job record."""
     if not settings.AWS_S3_BUCKET_NAME or not settings.AWS_ACCESS_KEY_ID:
         logger.warning("AWS S3 not configured — skipping post-scrape notification")
         return
-    if not settings.AWS_SES_FROM_EMAIL or not settings.AWS_SES_USERNAME:
-        logger.warning("AWS SES not configured — skipping post-scrape notification")
-        return
 
-    # Import here to avoid circular imports at module load time
     from services.export_service import export_to_excel
 
     result = export_to_excel()
@@ -102,8 +122,24 @@ def notify_scraping_complete() -> None:
 
     try:
         s3_url = upload_to_s3(excel_bytes, filename)
+        output_s3_key = f"exports/{filename}"
     except Exception:
-        logger.exception("S3 upload failed — email will not be sent")
+        logger.exception("S3 upload failed — skipping email and job output update")
+        return
+
+    if job_id is not None:
+        try:
+            from database.db import get_engine
+            from database.repository import update_job_output
+            update_job_output(get_engine(), job_id, output_s3_key, filename)
+        except Exception:
+            logger.exception("Failed to update job output in DB")
+
+    if not settings.RECIPIENT_EMAILS:
+        logger.warning("RECIPIENT_EMAILS not configured — skipping email")
+        return
+    if not settings.AWS_SES_FROM_EMAIL or not settings.AWS_SES_USERNAME:
+        logger.warning("AWS SES not configured — skipping email")
         return
 
     try:

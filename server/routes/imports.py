@@ -5,6 +5,8 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from sqlmodel import SQLModel
 
+import settings
+import state
 from database.db import get_engine
 from database.repository import (
     bulk_insert_imported_links,
@@ -14,8 +16,10 @@ from database.repository import (
     clear_imported_links,
     clear_imported_parts,
     clear_links_scraped_data,
+    create_job,
     get_imported_links_count,
     get_imported_parts_count,
+    update_job_input_s3,
 )
 
 router = APIRouter(prefix="/api", tags=["Import"])
@@ -150,10 +154,23 @@ async def import_excel(file: UploadFile = File(...)):
     count = bulk_insert_imported_parts(engine, records)
     logger.info(f"Imported {count} parts from {file.filename} (old links/scraped data cleared)")
 
+    job = create_job(engine, "parts", file.filename, count)
+    with state.state_lock:
+        state.current_parts_job_id = job.id
+
+    if settings.AWS_S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID:
+        try:
+            from services.aws_service import upload_input_to_s3
+            s3_key = upload_input_to_s3(contents, file.filename)
+            update_job_input_s3(engine, job.id, s3_key)
+        except Exception:
+            logger.exception("Failed to upload input file to S3 — job created without input key")
+
     return {
         "status": "success",
         "filename": file.filename,
         "rows_imported": count,
+        "job_id": job.id,
     }
 
 
@@ -225,6 +242,18 @@ async def import_links(file: UploadFile = File(...)):
         f"{product_detail_count} product_detail, {search_count} advantage_search)"
     )
 
+    job = create_job(engine, "links", file.filename, count)
+    with state.state_lock:
+        state.current_links_job_id = job.id
+
+    if settings.AWS_S3_BUCKET_NAME and settings.AWS_ACCESS_KEY_ID:
+        try:
+            from services.aws_service import upload_input_to_s3
+            s3_key = upload_input_to_s3(contents, file.filename)
+            update_job_input_s3(engine, job.id, s3_key)
+        except Exception:
+            logger.exception("Failed to upload input file to S3 — job created without input key")
+
     return {
         "status": "success",
         "filename": file.filename,
@@ -233,6 +262,7 @@ async def import_links(file: UploadFile = File(...)):
         "external_links": external_count,
         "product_detail_links": product_detail_count,
         "search_links": search_count,
+        "job_id": job.id,
     }
 
 

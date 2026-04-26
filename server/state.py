@@ -21,3 +21,7 @@ parallel_orchestrator = None
 is_link_extraction_running: bool = False
 active_link_extractor = None          # single-worker fallback (unused in current flow)
 parallel_link_extractor = None        # ParallelLinkExtractionOrchestrator instance
+
+# Job tracking — set on import, read when scraping starts
+current_parts_job_id: int | None = None
+current_links_job_id: int | None = None

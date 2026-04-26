@@ -146,6 +146,34 @@ export const getExportInfo = async (): Promise<ExportInfo> => {
   return response.data;
 };
 
+export interface Job {
+  id: number;
+  type: 'parts' | 'links';
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  input_filename: string;
+  input_row_count: number;
+  has_input_file: boolean;
+  has_output_file: boolean;
+  output_filename: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export const getJobs = async (): Promise<Job[]> => {
+  const response = await api.get<Job[]>('/api/jobs');
+  return response.data;
+};
+
+export const getJobInputUrl = async (jobId: number): Promise<string> => {
+  const response = await api.get<{ url: string }>(`/api/jobs/${jobId}/input-url`);
+  return response.data.url;
+};
+
+export const getJobOutputUrl = async (jobId: number): Promise<string> => {
+  const response = await api.get<{ url: string }>(`/api/jobs/${jobId}/output-url`);
+  return response.data.url;
+};
+
 export const downloadExport = async () => {
   // Use axios instead of window location so we can await the download completion for loading states
   const response = await api.get('/api/export', { responseType: 'blob' });
