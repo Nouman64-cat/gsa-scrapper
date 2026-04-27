@@ -438,7 +438,7 @@ class InternalLinkScraper:
             # Contractor name from known DOM selectors
             contractor_name = self._read_contractor_name_from_page()
 
-            if price is not None or contract_number:
+            if price is not None:
                 row = {
                     "manufacturer_part_name": mfr_name,
                     "manufacturer_part_number": mfr_part_num,

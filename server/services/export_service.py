@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 # Ensure the root project dir is in sys.path so we can import modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.db import get_engine
-from database.models import GSAScrapedData, ImportedLink, ImportedPart, LinkScrapedData
+from database.models import GSALink, GSAScrapedData, ImportedLink, ImportedPart, LinkScrapedData
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,7 @@ def export_to_excel():
         with Session(engine) as session:
             imported_parts = session.exec(select(ImportedPart).order_by(ImportedPart.id)).all()
             scraped_parts  = session.exec(select(GSAScrapedData)).all()
+            gsa_links_all  = session.exec(select(GSALink)).all()
 
             # Build per-link lookups from imported_links.
             # link_type_map  : link_id → "internal" | "external"  (used for tab routing)
@@ -142,6 +143,11 @@ def export_to_excel():
                     LinkScrapedData.link_id, LinkScrapedData.row_order
                 )
             ).all()
+
+        # Part numbers that were attempted by the scraper (is_scraped=True in gsa_links)
+        attempted_part_numbers: set[str] = {
+            gl.part_number for gl in gsa_links_all if gl.is_scraped
+        }
 
         # Session filter: drop rows whose link_id is no longer in imported_links
         links_scraped = [r for r in links_scraped_raw if r.link_id in current_link_ids]
@@ -379,6 +385,16 @@ def export_to_excel():
                     c.fill  = black_fill
                     c.value = None
 
+        def _highlight_parts_failed_rows(ws, failed_row_indices: list):
+            """Highlight specific rows (1-based, where row 1 is header) with red."""
+            from openpyxl.styles import PatternFill, Font
+            red_fill   = PatternFill(fill_type="solid", fgColor="FF0000")
+            white_bold = Font(bold=True, color="FFFFFF")
+            for row_idx in failed_row_indices:
+                for cell in ws[row_idx]:
+                    cell.fill = red_fill
+                    cell.font = white_bold
+
         def _highlight_failed_rows(ws, first_failed_row: int):
             """
             Highlight every non-separator cell from first_failed_row to the last
@@ -469,8 +485,11 @@ def export_to_excel():
 
                 scraped_dict = {str(s.part_number).strip(): s for s in scraped_parts}
                 matched = 0
-                for idx, row in df.iterrows():
+                # worksheet row index for each df row (header=1, data starts at 2)
+                failed_ws_rows: list[int] = []
+                for df_pos, (idx, row) in enumerate(df.iterrows()):
                     pn = str(row['part_number']).strip()
+                    ws_row = df_pos + 2  # +1 for header, +1 for 1-based index
                     if pn in scraped_dict:
                         s = scraped_dict[pn]
                         df.at[idx, '1 GSA Low Price']   = _v(s.gsa_low_price_1)
@@ -479,11 +498,24 @@ def export_to_excel():
                         df.at[idx, '2 GSA Low Price']    = _v(s.gsa_low_price_2)
                         df.at[idx, 'Unit.1']             = _v(s.unit_2)
                         df.at[idx, 'Contractor:Name.1']  = _v(s.contractor_2)
-                        matched += 1
+                        # Contractor-only (no price extracted) → treat as failed
+                        if s.gsa_low_price_1 is None and s.gsa_low_price_2 is None:
+                            failed_ws_rows.append(ws_row)
+                        else:
+                            matched += 1
+                    elif pn in attempted_part_numbers:
+                        # Scraping was attempted but produced no results
+                        failed_ws_rows.append(ws_row)
 
                 df.to_excel(writer, sheet_name="GSA Parts Data", index=False)
-                _style_header(writer.sheets["GSA Parts Data"])
-                logger.info(f"Export 'GSA Parts Data': {matched} row(s) matched")
+                ws_parts = writer.sheets["GSA Parts Data"]
+                _style_header(ws_parts)
+                if failed_ws_rows:
+                    _highlight_parts_failed_rows(ws_parts, failed_ws_rows)
+                logger.info(
+                    f"Export 'GSA Parts Data': {matched} row(s) matched, "
+                    f"{len(failed_ws_rows)} row(s) failed (red)"
+                )
 
             # ── Internal Links (product-detail link extraction) ───────────────
             if has_internal_data:

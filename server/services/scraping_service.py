@@ -418,7 +418,7 @@ class GSAScrapingAutomation:
         for i in range(start_index, len(products)):
             try:
                 product_info = self._extract_product_info(products[i], i + 1, target_manufacturer)
-                if product_info and (product_info.get('price') is not None or product_info.get('contractor') is not None):
+                if product_info and product_info.get('price') is not None:
                     # Skip header-like entries
                     contractor = product_info.get('contractor', '') or ''
                     if any(h in contractor.lower() for h in ['name contract', 'price low', 'view as', 'sort by']):
