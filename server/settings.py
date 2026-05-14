@@ -21,7 +21,7 @@ DB_PASSWORD = os.getenv("POSTGRESQL_PASSWORD")   # No fallback – must be set i
 # Comma-separated list of allowed origins, e.g. "http://localhost:3000,https://myapp.com"
 ALLOWED_ORIGINS = [
     o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:4000").split(",")
+    for o in os.getenv("ALLOWED_ORIGINS", "https://gsa-scrapper.vercel.app,http://localhost:3000,http://localhost:4000").split(",")
     if o.strip()
 ]
 
